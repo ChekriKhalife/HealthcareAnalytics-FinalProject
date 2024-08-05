@@ -8,7 +8,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 from statsmodels.tsa.seasonal import seasonal_decompose
-from st_aggrid import AgGrid, GridOptionsBuilder
+
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import io
 import base64
