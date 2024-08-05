@@ -899,7 +899,7 @@ def smoking_campaign():
         st.write("4. Don't start smoking - be a positive role model for others")
 
 # Main execution
-if _name_ == "_main_":
+if __name__ == "__main__":
     st.sidebar.title("Stroke Risk Factor Explorer")
     st.sidebar.write("Explore different risk factors and learn how to reduce your risk of stroke.")
     
