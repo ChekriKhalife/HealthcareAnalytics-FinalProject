@@ -1,0 +1,9 @@
+streamlit==1.25.0
+pandas==2.0.3
+numpy==1.24.3
+plotly==5.17.0
+statsmodels==0.13.5
+seaborn==0.12.2
+matplotlib==3.7.2
+scipy==1.11.1
+st-aggrid==0.3.3
