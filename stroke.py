@@ -14,7 +14,7 @@ import io
 import base64
 
 # Load your data
-df=pd.read_csv("C:\\Users\\hp\\Desktop\\healthcare\\Stroke_data.csv")
+df=pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
 df['year'] = pd.to_datetime(df['year'], errors='coerce').dt.year  # Ensure year is an integer
 
 
