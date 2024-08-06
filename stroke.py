@@ -7,7 +7,7 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
-from st_aggrid import AgGrid, GridOptionsBuilder
+
 import io
 import base64
 from pmdarima import auto_arima
