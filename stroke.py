@@ -918,7 +918,8 @@ Disclaimer: This dashboard is for informational purposes only. The data presente
 
 def main():
     st.sidebar.markdown("---")
-    st.sidebar.info("Healthcare Analytics)
+    st.sidebar.info('Healthcare Analytics)
+    st.sidebar.text("Version 1.0")
 
 
 if __name__ == "__main__":
