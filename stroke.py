@@ -16,7 +16,8 @@ import base64
 # Load your data
 df=pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
 df['year'] = pd.to_datetime(df['year'], errors='coerce').dt.year  # Ensure year is an integer
-
+# Initialize filtered_df to avoid undefined errors
+filtered_df = df.copy()
 
 # Set page config
 st.set_page_config(page_title="Stroke Analysis Dashboard", layout="wide")
