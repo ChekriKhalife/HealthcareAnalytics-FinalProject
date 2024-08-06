@@ -3,30 +3,26 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.arima.model import ARIMA
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
-
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import io
 import base64
-from pmdarima import auto_arima
-
 
 # Load your data
 @st.cache_data
 def load_data():
     df = pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
-    
-    # Print the first few values of the 'year' column
-    print(df['year'].head())
-    
-    # Convert 'year' column to datetime, then extract year
-    df['year'] = pd.to_datetime(df['year'], errors='coerce').dt.year
-    
+    df['year'] = pd.to_datetime(df['year'], format='mixed').dt.year
     return df
 
 df = load_data()
+# Initialize filtered_df to avoid undefined errors
+filtered_df = df.copy()
 
 # Set page config
 st.set_page_config(page_title="Stroke Analysis Dashboard", layout="wide")
@@ -82,6 +78,37 @@ st.markdown("""
         color: white;
         font-weight: bold;
     }
+    .section-header {
+        color: #2c3e50;
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 10px;
+    }
+    .explanation-box {
+        background-color: #e8f4f8;
+        border-radius: 5px;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-left: 5px solid #3498db;
+    }
+    .forecast-table {
+        margin-top: 20px;
+        margin-bottom: 30px;
+    }
+    .insight-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .insight-card h4 {
+        color: #2c3e50;
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,6 +140,12 @@ def filter_data_for_section(section, df, user_selections):
     
     if 'rei' in user_selections and user_selections['rei']:
         filtered = filtered[filtered['rei'].isin(user_selections['rei'])]
+    
+    # Check if the filtered dataset is empty
+    if filtered.empty:
+        st.warning("No data available for the selected filters. Please adjust your selection.")
+        st.write("Selected filters:", user_selections)
+        return None
     
     return filtered
 
@@ -218,14 +251,11 @@ if selected_section == "Introduction":
     st.header("Data Overview")
     st.markdown(f"""
     - *Number of Rows:* {df.shape[0]}
-    - *Number of Columns:* {df.shape[1] - 1}  # Adjusted to exclude the unnamed index column
+    - *Number of Columns:* {df.shape[1]}
     """)
 
-    # Remove unnamed index column for display
-    display_df = df.drop(columns=df.columns[0])
-
     st.subheader("Sample of the Dataset")
-    st.write(display_df.head())
+    st.write(df.head())
 
     st.subheader("Source Description")
     st.markdown("""
@@ -257,7 +287,6 @@ if selected_section == "Introduction":
         data=csv_full,
         file_name="full_stroke_data.csv",
         mime="text/csv",
-        
     )
 
 elif selected_section == "Geographical Analysis":
@@ -269,7 +298,7 @@ elif selected_section == "Geographical Analysis":
     
     with col1:
         countries = df['location'].unique()
-        selected_countries = st.multiselect("Select Countries", countries, default=countries[:3], key="georgraphical_countries")
+        selected_countries = st.multiselect("Select Countries", countries, default=countries[:3], key="geographical_countries")
     
     with col2:
         years = df['year'].dropna().unique().astype(int)
@@ -606,225 +635,540 @@ elif selected_section == "Demographic Analysis":
         
         # 1. Age Distribution
         st.markdown("<p class='chart-title'>Stroke Burden by Age Group</p>", unsafe_allow_html=True)
-        age_dist = filtered_df.groupby('age')['Rate'].mean().reset_index()
-        fig_age = px.bar(age_dist, x='age', y='Rate', color='age',
-                         title='Stroke Burden by Age Group',
-                         labels={'Rate': 'Burden Rate', 'age': 'Age Group'},
-                         color_discrete_sequence=px.colors.sequential.Plasma)
-        
+        age_data = filtered_df.groupby('age')['Rate'].mean().reset_index()
+        fig_age = px.bar(
+            age_data,
+            x='age',
+            y='Rate', 
+            labels={'Rate': 'Average Burden Rate', 'age': 'Age Group'},
+            color='Rate',
+            color_continuous_scale=px.colors.sequential.Tealgrn)
         fig_age.update_layout(
-            font=dict(size=12),
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            title=dict(font=dict(size=16))
+            height=400,
+            xaxis_title="Age Group",
+            yaxis_title="Average Burden Rate",
+            plot_bgcolor="#f0f2f5",
+            margin=dict(l=20, r=20, t=40, b=20)
         )
-        fig_age.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey')
-        fig_age.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey', title_text="Burden Rate")
         st.plotly_chart(fig_age, use_container_width=True)
         
-        # 2. Gender Distribution
-        st.markdown("<p class='chart-title'>Stroke Burden by Gender</p>", unsafe_allow_html=True)
-        gender_dist = filtered_df.groupby('sex')['Rate'].mean().reset_index()
-        fig_gender = px.bar(gender_dist, x='sex', y='Rate', color='sex',
-                            title='Stroke Burden by Gender',
-                            labels={'Rate': 'Burden Rate', 'sex': 'Gender'},
-                            color_discrete_sequence=px.colors.sequential.Plasma)
-        
-        fig_gender.update_layout(
-            font=dict(size=12),
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            title=dict(font=dict(size=16))
+        # 2. Gender Comparison
+        st.markdown("<p class='chart-title'>Gender Comparison</p>", unsafe_allow_html=True)
+        gender_data = filtered_df.groupby('sex')['Rate'].mean().reset_index()
+        fig_gender = px.pie(
+            gender_data,
+            names='sex',
+            values='Rate',
+            labels={'Rate': 'Average Burden Rate', 'sex': 'Gender'},
+            color='sex',
+            color_discrete_map={'Male': '#4C78A8', 'Female': '#F58518'}
         )
-        fig_gender.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey')
-        fig_gender.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey', title_text="Burden Rate")
+        fig_gender.update_traces(textposition='inside', textinfo='percent+label')
+        fig_gender.update_layout(
+            height=400,
+            showlegend=True,
+            legend_title_text='Gender',
+            plot_bgcolor="#f0f2f5",
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
         st.plotly_chart(fig_gender, use_container_width=True)
         
-        # 3. Risk Factor Distribution
-        st.markdown("<p class='chart-title'>Stroke Burden by Risk Factor</p>", unsafe_allow_html=True)
-        risk_dist = filtered_df.groupby('rei')['Rate'].mean().reset_index()
-        fig_risk = px.pie(risk_dist, values='Rate', names='rei',
-                          title='Distribution of Stroke Burden by Risk Factor',
-                          color_discrete_sequence=px.colors.sequential.Plasma)
-        
-        fig_risk.update_layout(
-            font=dict(size=12),
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            title=dict(font=dict(size=16))
+        # 3. Country Comparison
+        st.markdown("<p class='chart-title'>Country Comparison</p>", unsafe_allow_html=True)
+        country_data = filtered_df.groupby('location')['Rate'].mean().reset_index()
+        fig_country = px.bar(
+            country_data,
+            x='location',
+            y='Rate', 
+            labels={'Rate': 'Average Burden Rate', 'location': 'Country'},
+            color='Rate',
+            color_continuous_scale=px.colors.sequential.Sunset
         )
-        st.plotly_chart(fig_risk, use_container_width=True)
+        fig_country.update_layout(
+            height=400,
+            xaxis_title="Country",
+            yaxis_title="Average Burden Rate",
+            plot_bgcolor="#f0f2f5",
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig_country, use_container_width=True)
+        
+        # 4. Age-Gender Heatmap
+        st.markdown("<p class='chart-title'>Age-Gender Distribution</p>", unsafe_allow_html=True)
+        heatmap_gender = filtered_df.groupby(['age', 'sex'])['Rate'].mean().reset_index()
+        heatmap_pivot_gender = heatmap_gender.pivot(index='age', columns='sex', values='Rate')
+        fig_heatmap_gender = px.imshow(
+            heatmap_pivot_gender, 
+            labels=dict(x="Gender", y="Age Group", color="Burden Rate"),
+            color_continuous_scale=px.colors.sequential.YlOrBr,
+            aspect='auto'  # Ensures the aspect ratio is optimized
+        )
+        fig_heatmap_gender.update_layout(
+            height=500,
+            title_text="Age-Gender Distribution of Stroke Burden",
+            plot_bgcolor="#f0f2f5",
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig_heatmap_gender, use_container_width=True)
+        
+        # 5. Age-Country Heatmap
+        st.markdown("<p class='chart-title'>Age-Country Distribution</p>", unsafe_allow_html=True)
+        heatmap_country = filtered_df.groupby(['age', 'location'])['Rate'].mean().reset_index()
+        heatmap_pivot_country = heatmap_country.pivot(index='age', columns='location', values='Rate')
+        fig_heatmap_country = px.imshow(
+            heatmap_pivot_country, 
+            labels=dict(x="Country", y="Age Group", color="Burden Rate"),
+            color_continuous_scale=px.colors.sequential.Bluered,
+            aspect='auto'
+        )
+        fig_heatmap_country.update_layout(
+            height=500,
+            title_text="Age-Country Distribution of Stroke Burden",
+            plot_bgcolor="#f0f2f5",
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig_heatmap_country, use_container_width=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
         
         # Key Insights
-        st.header("Key Insights")
-        max_age_burden = age_dist.iloc[age_dist['Rate'].idxmax()]
-        st.markdown(f"- **Highest Stroke Burden by Age Group:** {max_age_burden['age']} ({max_age_burden['Rate']:.2f})")
-        max_gender_burden = gender_dist.iloc[gender_dist['Rate'].idxmax()]
-        st.markdown(f"- **Gender with Highest Stroke Burden:** {max_gender_burden['sex']} ({max_gender_burden['Rate']:.2f})")
+        st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+        st.header("Key Demographic Insights")
         
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Most affected age group
+            most_affected_age = age_data.loc[age_data['Rate'].idxmax()]
+            st.info(f"🔍 Most Affected Age Group\n\n"
+                    f"**Age Group:** {most_affected_age['age']}\n"
+                    f"**Average Burden Rate:** {most_affected_age['Rate']:.2f}")
+
+            # Gender comparison
+            if len(gender_data) > 1:
+                more_affected_gender = gender_data.loc[gender_data['Rate'].idxmax()]
+                less_affected_gender = gender_data.loc[gender_data['Rate'].idxmin()]
+                gender_diff_pct = (more_affected_gender['Rate'] - less_affected_gender['Rate']) / less_affected_gender['Rate'] * 100
+                st.info(f"⚖️ Gender Comparison\n\n"
+                        f"**{more_affected_gender['sex']}** are {gender_diff_pct:.2f}% more affected than **{less_affected_gender['sex']}**\n"
+                        f"**{more_affected_gender['sex']} Rate:** {more_affected_gender['Rate']:.2f}\n"
+                        f"**{less_affected_gender['sex']} Rate:** {less_affected_gender['Rate']:.2f}")
+            else:
+                st.info("⚖️ Gender Comparison\n\nNot available (only one gender selected)")
+
+        with col2:
+            # Country comparison
+            most_affected_country = country_data.loc[country_data['Rate'].idxmax()]
+            least_affected_country = country_data.loc[country_data['Rate'].idxmin()]
+            st.info(f"🌍 Country Comparison\n\n"
+                    f"**Highest burden:** {most_affected_country['location']} ({most_affected_country['Rate']:.2f})\n"
+                    f"**Lowest burden:** {least_affected_country['location']} ({least_affected_country['Rate']:.2f})")
+
+            # Overall statistics
+            overall_avg = filtered_df['Rate'].mean()
+            overall_max = filtered_df['Rate'].max()
+            overall_min = filtered_df['Rate'].min()
+            st.info(f"📊 Overall Statistics\n\n"
+                    f"**Average Rate:** {overall_avg:.2f}\n"
+                    f"**Highest Rate:** {overall_max:.2f}\n"
+                    f"**Lowest Rate:** {overall_min:.2f}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
         # Download button for filtered data
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Download filtered data as CSV",
+            label="📥 Download Demographic Analysis Data",
             data=csv,
-            file_name="demographic_analysis.csv",
+            file_name=f"demographic_analysis_{selected_year}.csv",
             mime="text/csv",
-            key="demographic_download_button"
+            key="demographic_analysis_download_button"
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
 elif selected_section == "Risk Factor Analysis":
-    st.title("Analysis of Stroke Risk Factors")
-
-    # Filters for risk factors
-    st.subheader("Data Filters")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        countries = df['location'].unique()
-        selected_countries = st.multiselect("Select Countries", countries, default=countries[:3], key="risk_countries")
+    st.title("Risk Factor Analysis for Stroke Burden")
     
-    with col2:
-        years = df['year'].dropna().unique().astype(int)
-        year_range = st.slider("Select Year Range", int(years.min()), int(years.max()), 
-                               (int(years.min()), int(years.max())), key="risk_years")
+    # Filters for this section
+    countries = df['location'].unique()
+    selected_countries = st.multiselect("Select Countries", countries, default=countries[:3])
     
-    with col3:
-        risk_factors = df['rei'].unique()
-        selected_risk_factors = st.multiselect("Select Risk Factors", risk_factors, default=risk_factors, key="risk_factors")
-
+    years = df['year'].dropna().unique().astype(int)
+    year_range = st.slider("Select Year Range", int(years.min()), int(years.max()), (int(years.min()), int(years.max())))
+    
+    measures = df['measure'].unique()
+    selected_measure = st.selectbox("Select Measure", measures)
+    
     # Filter data
-    filtered_df = df[
-        (df['location'].isin(selected_countries)) &
-        (df['year'].between(year_range[0], year_range[1])) &
-        (df['rei'].isin(selected_risk_factors))
-    ]
+    filtered_df = filter_data(df, selected_countries, year_range, [selected_measure], df['sex'].unique(), df['age'].unique(), df['rei'].unique())
     
     if filtered_df.empty:
         st.warning("No data available for the selected filters. Please adjust your selection.")
     else:
-        st.header("Risk Factors Overview")
+        # Ensure correct aggregation: Use the mean for Rate
+        risk_df = filtered_df.pivot_table(values='Rate', index='location', columns='rei', aggfunc='mean')
         
-        # Distribution of Risk Factors
-        risk_factor_counts = filtered_df['rei'].value_counts().reset_index()
-        risk_factor_counts.columns = ['Risk Factor', 'Count']
-        fig_risk = px.bar(risk_factor_counts, x='Risk Factor', y='Count',
-                          title='Distribution of Stroke Risk Factors',
-                          labels={'Count': 'Number of Records', 'Risk Factor': 'Risk Factor'},
-                          color_discrete_sequence=px.colors.sequential.Plasma)
-        fig_risk.update_layout(
-            font=dict(size=12),
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            title=dict(font=dict(size=16))
+        # Visualize with a heatmap
+        fig = px.imshow(risk_df, 
+                        labels=dict(x="Risk Factor", y="Country", color="Burden Rate"),
+                        title=f'Heatmap of Risk Factors Impact on {selected_measure}',
+                        color_continuous_scale=px.colors.sequential.YlOrRd)
+        
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Radar chart for mean impact of risk factors
+        risk_mean = risk_df.mean().reset_index()
+        risk_mean.columns = ['Risk Factor', 'Mean Impact']
+        
+        fig = go.Figure(data=go.Scatterpolar(
+          r=risk_mean['Mean Impact'],
+          theta=risk_mean['Risk Factor'],
+          fill='toself',
+          line=dict(color='rgb(31, 119, 180)')
+        ))
+
+        fig.update_layout(
+          polar=dict(
+            radialaxis=dict(
+              visible=True,
+              range=[0, risk_mean['Mean Impact'].max()]
+            )),
+          showlegend=False,
+          title=f'Average Impact of Risk Factors on {selected_measure}'
         )
-        fig_risk.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey')
-        fig_risk.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey', title_text="Number of Records")
-        st.plotly_chart(fig_risk, use_container_width=True)
         
-        # Trends in Risk Factors over Time
-        st.header("Trends in Risk Factors over Time")
-        risk_trends = filtered_df.groupby(['year', 'rei'])['Rate'].mean().reset_index()
-        fig_trends = px.line(risk_trends, x='year', y='Rate', color='rei',
-                             title='Trends in Stroke Burden by Risk Factor',
-                             labels={'Rate': 'Burden Rate', 'year': 'Year', 'rei': 'Risk Factor'},
-                             color_discrete_sequence=px.colors.sequential.Plasma)
-        fig_trends.update_layout(
-            font=dict(size=12),
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            title=dict(font=dict(size=16))
-        )
-        fig_trends.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey')
-        fig_trends.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgrey', title_text="Burden Rate")
-        st.plotly_chart(fig_trends, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
         
-        # Key Insights
-        st.header("Key Insights")
-        for risk_factor in selected_risk_factors:
-            risk_data = risk_trends[risk_trends['rei'] == risk_factor]
-            latest_data = risk_data.iloc[-1]
-            st.markdown(f"- **{risk_factor}:** The latest data in {latest_data['year']} shows a burden rate of {latest_data['Rate']:.2f}.")
+        # Add insights
+        st.subheader("Key Insights")
+        top_risk_factor = risk_mean.loc[risk_mean['Mean Impact'].idxmax()]
+        st.write(f"1. The risk factor with the highest average impact on {selected_measure} is '{top_risk_factor['Risk Factor']}' with a mean impact of {top_risk_factor['Mean Impact']:.2f}.")
         
+        country_top_risks = risk_df.idxmax(axis=1)
+        most_common_risk = country_top_risks.value_counts().index[0]
+        st.write(f"2. The most common top risk factor across countries for {selected_measure} is '{most_common_risk}'.")
+        
+        risk_variability = risk_df.std() / risk_df.mean()
+        most_variable_risk = risk_variability.idxmax()
+        st.write(f"3. The risk factor with the most variability across countries for {selected_measure} is '{most_variable_risk}'.")
+
         # Download button for filtered data
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Download filtered data as CSV",
+            label="📥 Download Risk Factor Analysis Data",
             data=csv,
-            file_name="risk_factors_analysis.csv",
+            file_name="risk_factor_analysis.csv",
             mime="text/csv",
-            key="risk_factors_download_button"
+            key="risk_factor_analysis_download_button"
         )
 
 elif selected_section == "Forecasting":
-    st.title("Forecasting Future Trends in Stroke Burden")
+    st.markdown("<div class='section-header'><h1>Stroke Burden Forecasting</h1></div>", unsafe_allow_html=True)
 
-    st.subheader("Data Filters")
-    col1, col2 = st.columns(2)
+    # Create columns for better filter layout
+    col1, col2, col3 = st.columns(3)
+
     with col1:
-        countries = df['location'].unique()
-        selected_country = st.selectbox("Select Country", countries, key="forecast_country")
-    
+        selected_countries = st.multiselect("Select Countries for Forecasting", df['location'].unique(), default=['Algeria'])
+        selected_measures = st.multiselect("Select Measures", df['measure'].unique(), default=df['measure'].unique()[:1])
+
     with col2:
-        metrics = df['measure'].unique()
-        selected_metric = st.selectbox("Select Metric", metrics, key="forecast_metric")
+        metric = st.selectbox("Select Metric for Forecasting", ["Rate", "Percent"])
+        
+        # Add "All Ages" option to age group selection
+        age_options = ["All Ages"] + list(df['age'].unique())
+        selected_age_group = st.selectbox("Select Age Group", age_options)
 
-    st.subheader("Risk Factor Selection")
-    selected_risk_factors = st.multiselect("Select Risk Factors", df['rei'].unique(), key="forecast_risk_factors")
+    with col3:
+        gender = st.selectbox("Select Gender", ["All", "Male", "Female"])
+        selected_risk_factors = st.multiselect("Select Risk Factors", df['rei'].unique(), default=df['rei'].unique()[:3])
 
-    st.subheader("Forecast Settings")
-    forecast_years = st.slider("Select Number of Years to Forecast", 1, 10, 5, key="forecast_years")
+    forecast_years = st.slider("Select number of years to forecast", 1, 10, 5)
 
-    # Filter data for forecasting
-    forecast_data_df = df[
-        (df['location'] == selected_country) &
-        (df['measure'] == selected_metric) &
-        (df['rei'].isin(selected_risk_factors))
-    ]
+    if st.button("Generate Forecast", key="forecast_filter", help="Click to generate the forecast based on selected filters"):
+        user_selections = {
+            'countries': selected_countries,
+            'measures': selected_measures,
+            'age': None if selected_age_group == "All Ages" else selected_age_group,
+            'sex': gender,
+            'rei': selected_risk_factors
+        }
 
-    if forecast_data_df.empty:
-        st.warning("No data available for the selected filters. Please adjust your selection.")
+        filtered_df = filter_data_for_section(selected_section, df, user_selections)
+
+        if filtered_df is not None and not filtered_df.empty:
+            # Prepare data for forecasting
+            forecast_df = filtered_df.groupby(['year', 'location', 'measure', 'rei'])[metric].mean().reset_index()
+
+            # Perform forecasting for each country and measure
+            for country in selected_countries:
+                for measure in selected_measures:
+                    country_measure_data = forecast_df[
+                        (forecast_df['location'] == country) & 
+                        (forecast_df['measure'] == measure)
+                    ]
+
+                    if not country_measure_data.empty:
+                        forecast = forecast_data(country_measure_data, forecast_years, selected_risk_factors, metric)
+
+                        if forecast is not None and len(forecast) > 0:
+                            # Create forecast DataFrame
+                            last_year = country_measure_data['year'].max()
+                            forecast_index = pd.date_range(start=str(last_year + 1), periods=forecast_years, freq='Y')
+                            forecast_df_future = pd.DataFrame({
+                                'Year': forecast_index.year,
+                                f'Forecasted {metric}': forecast
+                            })
+
+                            # Plot results with enhanced design
+                            st.markdown(f"<h2 class='section-header'>{measure} Forecast for {country}</h2>", unsafe_allow_html=True)
+                            fig = go.Figure()
+
+                            fig.add_trace(go.Scatter(
+                                x=country_measure_data['year'].unique(), 
+                                y=country_measure_data.groupby('year')[metric].mean(),
+                                mode='lines+markers', 
+                                name='Historical', 
+                                line=dict(color='blue', width=2),
+                                marker=dict(size=8)
+                            ))
+
+                            fig.add_trace(go.Scatter(
+                                x=forecast_df_future['Year'], 
+                                y=forecast_df_future[f'Forecasted {metric}'],
+                                mode='lines+markers', 
+                                name='Forecast', 
+                                line=dict(color='red', width=2, dash='dash'),
+                                marker=dict(size=8, symbol='diamond')
+                            ))
+                            fig.update_layout(
+                                xaxis_title='Year', 
+                                yaxis_title=f'{measure} {metric}',
+                                legend_title='Legend', 
+                                height=600,
+                                template='plotly_white'
+                            )
+
+                            st.plotly_chart(fig, use_container_width=True)
+
+                            # Display forecast table with improved design
+                            st.markdown(f"<h3 class='section-header'>Forecast Table for {country} - {measure}</h3>", unsafe_allow_html=True)
+                            st.markdown("""
+                            <div class="explanation-box">
+                                <p><strong>Forecast Table Explanation:</strong> This table shows the projected values for future years based on historical trends and selected risk factors. The 'Year' column represents future years, and the 'Forecasted {metric}' column shows the predicted {metric} for each year.</p>
+                            </div>
+                            """.format(metric=metric), unsafe_allow_html=True)
+                            
+                            # Improved table design
+                            st.markdown('<div class="forecast-table">', unsafe_allow_html=True)
+                            styled_forecast = forecast_df_future.style.background_gradient(cmap='Blues', subset=[f'Forecasted {metric}']).format({f'Forecasted {metric}': '{:.2f}'})
+                            st.table(styled_forecast)
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                            # Calculate meaningful insights
+                            historical_mean = country_measure_data.groupby('year')[metric].mean().mean()
+                            forecast_mean = forecast.mean()
+                            percent_change = ((forecast_mean - historical_mean) / historical_mean) * 100
+                            
+                            last_historical = country_measure_data.groupby('year')[metric].mean().iloc[-1]
+                            first_forecast = forecast.iloc[0]
+                            last_forecast = forecast.iloc[-1]
+                            
+                            short_term_trend = ((first_forecast - last_historical) / last_historical) * 100
+                            long_term_trend = ((last_forecast - first_forecast) / first_forecast) * 100
+
+                            # Display insights with improved design
+                            st.markdown("<h3 class='section-header'>Forecast Insights</h3>", unsafe_allow_html=True)
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown(f"""
+                                <div class="insight-card">
+                                    <h4>Overall Trend</h4>
+                                    <p>The average {metric} is projected to <span style="color: {'red' if percent_change > 0 else 'green'}; font-weight: bold;">{'increase' if percent_change > 0 else 'decrease'} by {abs(percent_change):.2f}%</span> over the forecast period.</p>
+                                    <p>This suggests a <span style="font-weight: bold;">{'worsening' if percent_change > 0 else 'improving'}</span> trend in stroke burden for {country}.</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with col2:
+                                st.markdown(f"""
+                                <div class="insight-card">
+                                    <h4>Short-term vs Long-term Trends</h4>
+                                    <p>Short-term change (first year): <span style="color: {'red' if short_term_trend > 0 else 'green'}; font-weight: bold;">{'increase' if short_term_trend > 0 else 'decrease'} of {abs(short_term_trend):.2f}%</span></p>
+                                    <p>Long-term change (entire forecast): <span style="color: {'red' if long_term_trend > 0 else 'green'}; font-weight: bold;">{'increase' if long_term_trend > 0 else 'decrease'} of {abs(long_term_trend):.2f}%</span></p>
+                                    <p>This indicates <span style="font-weight: bold;">{'acceleration' if abs(long_term_trend) > abs(short_term_trend) else 'deceleration'}</span> in the trend over time.</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            st.markdown(f"""
+                            <div class="insight-card">
+                                <h4>Key Takeaways</h4>
+                                <ol>
+                                    <li>The forecast suggests a <span style="font-weight: bold;">{'rising' if percent_change > 0 else 'falling'}</span> trend in stroke burden for {country}, considering the selected risk factors.</li>
+                                    <li>Policy makers should <span style="font-weight: bold;">{'prepare for increased healthcare demands' if percent_change > 0 else 'capitalize on the improving situation'}</span>, with a focus on managing the selected risk factors.</li>
+                                    <li>{'<span style="color: red; font-weight: bold;">Immediate action may be needed</span> to address the rapidly increasing burden.' if short_term_trend > 5 else 'The change appears to be gradual, allowing time for measured policy responses.'}</li>
+                                    <li>{'The situation is projected to worsen over time, requiring <span style="font-weight: bold;">long-term planning and interventions</span>.' if long_term_trend > short_term_trend else 'The rate of change is expected to slow down over time, but continued monitoring is advised.'}</li>
+                                    <li>Regular reassessment of these projections is recommended as new data becomes available, especially regarding the impact of the selected risk factors.</li>
+                                </ol>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # Explanation of metrics and risk factor integration
+                            st.markdown("""
+                            <div class="explanation-box">
+                                <h4>Explanation of Metrics and Risk Factor Integration</h4>
+                                <p><strong>Percent Change:</strong> Calculated as the percentage difference between the average forecasted value and the average historical value. It indicates the overall expected change in stroke burden, considering the selected risk factors.</p>
+                                <p><strong>Short-term Trend:</strong> Calculated as the percentage change between the last historical data point and the first forecasted point. It shows the immediate expected change, influenced by recent risk factor trends.</p>
+                                <p><strong>Long-term Trend:</strong> Calculated as the percentage change between the first and last forecasted points. It indicates the expected change over the entire forecast period, accounting for projected changes in risk factors.</p>
+                                <p><strong>Risk Factor Integration:</strong> The forecast model incorporates the selected risk factors as exogenous variables, allowing their historical trends to influence future projections. This approach provides a more nuanced forecast that considers the complex interplay of various risk factors on stroke burden.</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        else:
+                            st.info(f"Unable to generate a reliable forecast for {country} - {measure} due to limited data. Consider adjusting your selection or gathering more historical data.")
+                    else:
+                        st.info(f"No data available for {country} - {measure}. Please adjust your selection.")
+
+            # Export functionality
+            if st.button("Export Forecast Results"):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    for country in selected_countries:
+                        for measure in selected_measures:
+                            country_measure_data = forecast_df[(forecast_df['location'] == country) & (forecast_df['measure'] == measure)]
+                            if len(country_measure_data) > 0:
+                                country_measure_data.to_excel(writer, sheet_name=f'{country}_{measure}', index=False)
+                    writer.save()
+                output.seek(0)
+                b64 = base64.b64encode(output.read()).decode()
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="forecast_results.xlsx" class="apply-filter-btn">Download Excel File</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        else:
+            st.info("No data available for the selected filters. Please adjust your selection and try again.")
+
+elif selected_section == "Statistical Tests":
+    st.title("Statistical Tests and Advanced Analysis")
+    
+    st.write("This section provides more in-depth statistical analysis of the stroke burden data.")
+    
+    # Filters for this section
+    countries = df['location'].unique()
+    selected_countries = st.multiselect("Select Countries", countries, default=countries[:3])
+    
+    years = df['year'].dropna().unique().astype(int)
+    year_range = st.slider("Select Year Range", int(years.min()), int(years.max()), (int(years.min()), int(years.max())))
+    
+    measures = df['measure'].unique()
+    selected_measure = st.selectbox("Select Measure", measures)
+    
+    # Filter data
+    filtered_df = filter_data(df, selected_countries, year_range, [selected_measure], df['sex'].unique(), df['age'].unique(), df['rei'].unique())
+    
+    # T-test for gender differences
+    male_data = filtered_df[filtered_df['sex'] == 'Male']['Rate']
+    female_data = filtered_df[filtered_df['sex'] == 'Female']['Rate']
+    t_stat, p_value = stats.ttest_ind(male_data, female_data)
+    
+    st.subheader("1. T-test for Gender Differences")
+    st.write(f"T-statistic: {t_stat:.4f}")
+    st.write(f"P-value: {p_value:.4f}")
+    if p_value < 0.05:
+        st.write("There is a statistically significant difference in stroke burden between males and females.")
     else:
-        st.header("Forecast Results")
+        st.write("There is no statistically significant difference in stroke burden between males and females.")
+    
+    # ANOVA for age group differences
+    age_groups = filtered_df['age'].unique()
+    age_data = [filtered_df[filtered_df['age'] == age]['Rate'] for age in age_groups]
+    f_stat, p_value = stats.f_oneway(*age_data)
+    
+    st.subheader("2. ANOVA for Age Group Differences")
+    st.write(f"F-statistic: {f_stat:.4f}")
+    st.write(f"P-value: {p_value:.4f}")
+    if p_value < 0.05:
+        st.write("There are statistically significant differences in stroke burden among age groups.")
+    else:
+        st.write("There are no statistically significant differences in stroke burden among age groups.")
+    
+    # Correlation matrix of risk factors
+    st.subheader("3. Correlation Matrix of Risk Factors")
+    risk_corr = filtered_df.pivot_table(values='Rate', index='location', columns='rei', aggfunc='mean').corr()
+    
+    fig, ax = plt.subplots(figsize=(12, 10))
+    sns.heatmap(risk_corr, annot=True, cmap='coolwarm', ax=ax)
+    plt.title("Correlation Matrix of Risk Factors")
+    st.pyplot(fig)
+    
+    # Top correlated risk factors
+    top_corr = risk_corr.unstack().sort_values(ascending=False).drop_duplicates()
+    top_corr = top_corr[top_corr != 1].head(5)
+    
+    st.write("Top 5 correlated risk factors:")
+    for (factor1, factor2), corr in top_corr.items():
+        st.write(f"- {factor1} and {factor2}: {corr:.4f}")
 
-        # Perform forecasting
-        forecasted_values = forecast_data(forecast_data_df, forecast_years, selected_risk_factors, 'Rate')
+# Footer
+st.markdown("""
+<style>
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #0E1117;
+    color: white;
+    text-align: center;
+    padding: 10px;
+    font-size: 14px;
+}
+</style>
+<div class="footer">
+    Stroke Analysis Dashboard | Created with Streamlit | Data source: IHME
+</div>
+""", unsafe_allow_html=True)
 
-        # Plot forecast results
-        fig_forecast = go.Figure()
-        fig_forecast.add_trace(go.Scatter(x=forecasted_values.index, y=forecasted_values.values, mode='lines', name='Forecasted Rate'))
-        fig_forecast.update_layout(
-            title=f"Forecasted Stroke Burden Rate in {selected_country} for {selected_metric}",
-            xaxis_title="Year",
-            yaxis_title="Burden Rate",
-            plot_bgcolor='rgba(240, 242, 245, 0.8)',
-            hoverlabel=dict(bgcolor="white", font_size=12),
-            font=dict(size=12),
-            showlegend=True
-        )
-        st.plotly_chart(fig_forecast, use_container_width=True)
+# Add a download button for the filtered data
+@st.cache_data
+def convert_df(df):
+    return df.to_csv().encode('utf-8')
 
-        # Provide actionable insights based on forecast
-        st.subheader("Actionable Insights")
-        st.write("Based on the forecast, here are some key insights:")
-        st.write(f"1. The forecast indicates a {forecasted_values.pct_change().iloc[-1]:.2%} change in stroke burden rate by the end of the forecast period.")
-        st.write("2. The selected risk factors have the potential to significantly influence future trends in stroke burden.")
-        st.write("3. It is recommended to focus on preventive measures targeting the top risk factors to mitigate the projected increase.")
+csv = convert_df(filtered_df)
 
-        # Download button for forecast data
-        csv = forecasted_values.to_csv().encode('utf-8')
-        st.download_button(
-            label="Download forecast data as CSV",
-            data=csv,
-            file_name="forecasted_stroke_data.csv",
-            mime="text/csv",
-            key="forecast_download_button"
-        )
+st.download_button(
+    label="Download filtered data as CSV",
+    data=csv,
+    file_name="filtered_stroke_data.csv",
+    mime="text/csv",
+)
 
-# Closing section: Call to action
-st.sidebar.markdown("""
----
-## Call to Action
-This dashboard provides valuable insights into the burden of stroke and its associated risk factors. 
-It is crucial to translate these findings into effective public health strategies and interventions. 
-Act now to reduce the global impact of stroke.
+# Add a section for user feedback
+st.header("Feedback")
+feedback = st.text_area("Please provide any feedback or suggestions for improving this dashboard:")
+if st.button("Submit Feedback"):
+    # In a real application, you would save this feedback to a database or file
+    st.success("Thank you for your feedback!")
+
+# Add a section for additional resources
+st.header("Additional Resources")
+st.markdown("""
+- [World Health Organization - Stroke](https://www.who.int/health-topics/stroke)
+- [American Stroke Association](https://www.stroke.org/)
+- [National Stroke Association](https://www.stroke.org/)
+- [Global Burden of Disease Study](http://www.healthdata.org/gbd)
 """)
+
+# Add a disclaimer
+st.markdown("---")
+st.markdown("""
+Disclaimer: This dashboard is for informational purposes only. The data presented here should not be used for medical diagnosis or treatment. Always consult with a qualified healthcare provider for medical advice.
+""")
+
+def main():
+    st.sidebar.markdown("---")
+    st.sidebar.info('Healthcare Analytics')
+    st.sidebar.text("Version 1.0")
+
+
+if __name__ == "__main__":
+    main()
