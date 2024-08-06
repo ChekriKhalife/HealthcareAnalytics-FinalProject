@@ -919,8 +919,8 @@ Disclaimer: This dashboard is for informational purposes only. The data presente
 # Main function to run the app
 def main():
     st.sidebar.markdown("---")
-    st.sidebar.info("Created by [Your Name/Organization]")
-    st.sidebar.text("Version 1.0")
+    st.sidebar.info("Created by Chekri/Manouella/Charbel")
+    
 
 if __name__ == "__main__":
     main()
