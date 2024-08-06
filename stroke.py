@@ -13,6 +13,9 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import io
 import base64
 
+# Set page config
+st.set_page_config(page_title="Stroke Analysis Dashboard", layout="wide")
+
 # Load your data
 @st.cache_data
 def load_data():
@@ -23,9 +26,6 @@ def load_data():
 df = load_data()
 # Initialize filtered_df to avoid undefined errors
 filtered_df = df.copy()
-
-# Set page config
-st.set_page_config(page_title="Stroke Analysis Dashboard", layout="wide")
 
 # Custom CSS for better aesthetics
 st.markdown("""
