@@ -916,10 +916,7 @@ st.markdown("""
 Disclaimer: This dashboard is for informational purposes only. The data presented here should not be used for medical diagnosis or treatment. Always consult with a qualified healthcare provider for medical advice.
 """)
 
-# Main function to run the app
-def main():
-    st.sidebar.markdown("---")
-    st.sidebar.info("Created by Chekri/Manouella/Charbel")
+
     
 
 if __name__ == "__main__":
