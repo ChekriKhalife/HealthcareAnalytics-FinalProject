@@ -661,10 +661,10 @@ elif selected_section == "Geographical Analysis":
 
     # Calculate average burden rate, current burden rate, and top risk factor for each country
     country_analysis = filtered_df.groupby('location').agg({
-        'Rate': ['mean', lambda x: x.iloc[-1]],  # Average and most recent burden rate
-        'rei': lambda x: x.value_counts().index[0],  # Most common risk factor
-        ''year': 'max'  # Most recent year
-    }).reset_index()
+    'Rate': ['mean', lambda x: x.iloc[-1]],  # Average and most recent burden rate
+    'rei': lambda x: x.value_counts().index[0],  # Most common risk factor
+    'year': 'max'  # Most recent year
+}).reset_index()
 
     country_analysis.columns = ['Country', 'Average Burden', 'Current Burden', 'Top Risk Factor', 'Latest Year']
     country_analysis = country_analysis.sort_values('Average Burden', ascending=False)
