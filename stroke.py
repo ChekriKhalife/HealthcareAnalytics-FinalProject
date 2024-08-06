@@ -916,8 +916,10 @@ st.markdown("""
 Disclaimer: This dashboard is for informational purposes only. The data presented here should not be used for medical diagnosis or treatment. Always consult with a qualified healthcare provider for medical advice.
 """)
 
+def main():
+    st.sidebar.markdown("---")
+    st.sidebar.info("Healthcare Analytics)
 
-    
 
 if __name__ == "__main__":
     main()
