@@ -8,13 +8,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 from statsmodels.tsa.seasonal import seasonal_decompose
-
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import io
 import base64
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 # Load your data
-df=pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
+df = pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
 df['year'] = pd.to_datetime(df['year'], errors='coerce').dt.year  # Ensure year is an integer
 # Initialize filtered_df to avoid undefined errors
 filtered_df = df.copy()
@@ -73,6 +73,34 @@ st.markdown("""
         color: white;
         font-weight: bold;
     }
+    .section-header {
+        color: #2c3e50;
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    .explanation-box {
+        background-color: #f8f9fa;
+        border-left: 5px solid #3498db;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    .forecast-table {
+        margin-top: 20px;
+        margin-bottom: 30px;
+    }
+    .insight-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .insight-card h4 {
+        color: #2c3e50;
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,6 +111,7 @@ def create_metric_card(title, value):
         <p>{value}</p>
     </div>
     """
+
 def filter_data_for_section(section, df, user_selections):
     filtered = df.copy()
     
@@ -121,37 +150,57 @@ def filter_data(df, countries, year_range, measures, sex, age_groups, reis):
         (df['age'].isin(age_groups)) &
         (df['rei'].isin(reis))
     ]
-# Function to perform the forecast
+
+# Function to perform the forecast using multiple fallback methods
 def forecast_data(data, periods, risk_factors, metric):
-    # Prepare the data
-    data_pivoted = data.pivot(index='year', columns='rei', values=metric)
-    data_pivoted = data_pivoted.fillna(method='ffill').fillna(0)
-    
-    # Ensure all selected risk factors are in the data
-    for rf in risk_factors:
-        if rf not in data_pivoted.columns:
-            data_pivoted[rf] = 0
-    
-    # Select only the chosen risk factors
-    exog = data_pivoted[risk_factors]
-    
-    # Create a Series for the target variable
-    target = data.groupby('year')[metric].mean()
-    
-    # Ensure the index of exog matches the target
-    exog = exog.reindex(target.index)
-    
-    # Fit the SARIMAX model
     try:
-        model = SARIMAX(target, exog=exog, order=(1,1,1), seasonal_order=(1,1,1,12))
-        results = model.fit()
+        # Prepare the data
+        target = data.groupby('year')[metric].mean()
         
-        # Forecast
-        forecast = results.forecast(steps=periods, exog=exog.iloc[-periods:])
+        # Determine the number of seasonal periods based on the data's length
+        # Set a minimum of 2 for seasonal_periods
+        seasonal_periods = max(2, len(target) // 2)  # Adjust this logic based on your data
+        
+        if len(target) > seasonal_periods:
+            # Only apply seasonal modeling if the data length supports it
+            model = ExponentialSmoothing(target, trend='add', seasonal='add', seasonal_periods=seasonal_periods)
+        else:
+            # If insufficient data, fall back to a non-seasonal model
+            model = ExponentialSmoothing(target, trend='add', seasonal=None)
+        
+        fitted_model = model.fit()
+        forecast = fitted_model.forecast(periods)
+        
+        # If forecast is successful, return it
+        if not np.isnan(forecast).any():
+            return forecast
+        
+        # If Holt-Winters fails, try simple exponential smoothing
+        model = ExponentialSmoothing(target, trend=None, seasonal=None)
+        fitted_model = model.fit()
+        forecast = fitted_model.forecast(periods)
+        
+        # If simple exponential smoothing is successful, return it
+        if not np.isnan(forecast).any():
+            return forecast
+        
+        # If all else fails, use moving average
+        window = min(len(target), 3)  # Use up to 3 years for moving average
+        ma = target.rolling(window=window).mean()
+        last_ma = ma.iloc[-1]
+        last_year = pd.to_datetime(str(data['year'].max()), format='%Y')
+        forecast = pd.Series([last_ma] * periods, index=pd.date_range(start=last_year + pd.DateOffset(years=1), periods=periods, freq='Y'))
+        
         return forecast
+    
     except Exception as e:
-        st.error(f"Error in forecasting: {str(e)}")
-        return None
+        st.error(f"Error in forecasting: {e}")
+        # If everything fails, return a flat line based on the last known value
+        last_value = data[metric].iloc[-1]
+        last_year = pd.to_datetime(str(data['year'].max()), format='%Y')
+        forecast = pd.Series([last_value] * periods, index=pd.date_range(start=last_year + pd.DateOffset(years=1), periods=periods, freq='Y'))
+        return forecast
+
 # Sidebar
 st.sidebar.title("Stroke Analysis Dashboard")
 
@@ -161,6 +210,320 @@ selected_section = st.sidebar.radio("Select Section",
      "Forecasting", "Statistical Tests"])
 
 # Main content
+if selected_section == "Introduction":
+    # ... [Keep the Introduction section as it is] ...
+
+elif selected_section == "Geographical Analysis":
+    # ... [Keep the Geographical Analysis section as it is] ...
+
+elif selected_section == "Temporal Trends":
+    # ... [Keep the Temporal Trends section as it is] ...
+
+elif selected_section == "Demographic Analysis":
+    # ... [Keep the Demographic Analysis section as it is] ...
+
+elif selected_section == "Risk Factor Analysis":
+    # ... [Keep the Risk Factor Analysis section as it is] ...
+
+elif selected_section == "Forecasting":
+    st.markdown("<div class='section-header'><h1>Stroke Burden Forecasting</h1></div>", unsafe_allow_html=True)
+
+    # Create columns for better filter layout
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_countries = st.multiselect("Select Countries for Forecasting", df['location'].unique(), default=['Algeria'])
+        selected_measures = st.multiselect("Select Measures", df['measure'].unique(), default=df['measure'].unique()[:1])
+
+    with col2:
+        metric = st.selectbox("Select Metric for Forecasting", ["Rate", "Percent"])
+        
+        # Add "All Ages" option to age group selection
+        age_options = ["All Ages"] + list(df['age'].unique())
+        selected_age_group = st.selectbox("Select Age Group", age_options)
+
+    with col3:
+        gender = st.selectbox("Select Gender", ["All", "Male", "Female"])
+        selected_risk_factors = st.multiselect("Select Risk Factors", df['rei'].unique(), default=df['rei'].unique()[:3])
+
+    forecast_years = st.slider("Select number of years to forecast", 1, 10, 5)
+
+    if st.button("Generate Forecast", key="forecast_filter", help="Click to generate the forecast based on selected filters"):
+        user_selections = {
+            'countries': selected_countries,
+            'measures': selected_measures,
+            'age': None if selected_age_group == "All Ages" else selected_age_group,
+            'sex': gender,
+            'rei': selected_risk_factors
+        }
+
+        filtered_df = filter_data_for_section(selected_section, df, user_selections)
+
+        if filtered_df is not None and not filtered_df.empty:
+            # Prepare data for forecasting
+            forecast_df = filtered_df.groupby(['year', 'location', 'measure', 'rei'])[metric].mean().reset_index()
+
+            # Perform forecasting for each country and measure
+            for country in selected_countries:
+                for measure in selected_measures:
+                    country_measure_data = forecast_df[
+                        (forecast_df['location'] == country) & 
+                        (forecast_df['measure'] == measure)
+                    ]
+
+                    if not country_measure_data.empty:
+                        forecast = forecast_data(country_measure_data, forecast_years, selected_risk_factors, metric)
+
+                        if forecast is not None and len(forecast) > 0:
+                            # Create forecast DataFrame
+                            last_year = country_measure_data['year'].max()
+                            forecast_index = pd.date_range(start=str(last_year + 1), periods=forecast_years, freq='Y')
+                            forecast_df_future = pd.DataFrame({
+                                'Year': forecast_index.year,
+                                f'Forecasted {metric}': forecast
+                            })
+
+                            # Plot results with enhanced design
+                            st.markdown(f"<h2 class='section-header'>{measure} Forecast for {country}</h2>", unsafe_allow_html=True)
+                            fig = go.Figure()
+
+                            fig.add_trace(go.Scatter(
+                                x=country_measure_data['year'].unique(), 
+                                y=country_measure_data.groupby('year')[metric].mean(),
+                                mode='lines+markers', 
+                                name='Historical', 
+                                line=dict(color='blue', width=2),
+                                marker=dict(size=8)
+                            ))
+
+                            fig.add_trace(go.Scatter(
+                                x=forecast_df_future['Year'], 
+                                y=forecast_df_future[f'Forecasted {metric}'],
+                                mode='lines+markers', 
+                                name='Forecast', 
+                                line=dict(color='red', width=2, dash='dash'),
+                                marker=dict(size=8, symbol='diamond')
+                            ))
+
+                            fig.update_layout(
+                                xaxis_title='Year', 
+                                yaxis_title=f'{measure} {metric}',
+                                legend_title='Legend', 
+                                height=600,
+                                template='plotly_white'
+                            )
+
+                            st.plotly_chart(fig,import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from statsmodels.tsa.arima.model import ARIMA
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy import stats
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+import io
+import base64
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# Load your data
+df = pd.read_csv("https://github.com/ChekriKhalife/HealthcareAnalytics-FinalProject/raw/main/Stroke_data.csv")
+df['year'] = pd.to_datetime(df['year'], errors='coerce').dt.year  # Ensure year is an integer
+# Initialize filtered_df to avoid undefined errors
+filtered_df = df.copy()
+
+# Set page config
+st.set_page_config(page_title="Stroke Analysis Dashboard", layout="wide")
+
+# Custom CSS for better aesthetics
+st.markdown("""
+<style>
+    .reportview-container {
+        background: #f0f2f6;
+    }
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    .stSelectbox [data-baseweb="select"] {
+        background-color: #ffffff;
+    }
+    .metric-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        transition: transform 0.3s ease-in-out;
+    }
+    .metric-card:hover {
+        transform: translateY(-5px);
+    }
+    .metric-card h3 {
+        font-size: 18px;
+        margin-bottom: 10px;
+        color: #2c3e50;
+    }
+    .metric-card p {
+        font-size: 24px;
+        font-weight: bold;
+        color: #3498db;
+    }
+    .filter-container {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .filter-container h3 {
+        color: #2c3e50;
+        font-size: 20px;
+        margin-bottom: 15px;
+    }
+    .stButton>button {
+        background-color: #3498db;
+        color: white;
+        font-weight: bold;
+    }
+    .section-header {
+        color: #2c3e50;
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    .explanation-box {
+        background-color: #f8f9fa;
+        border-left: 5px solid #3498db;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    .forecast-table {
+        margin-top: 20px;
+        margin-bottom: 30px;
+    }
+    .insight-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .insight-card h4 {
+        color: #2c3e50;
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def create_metric_card(title, value):
+    return f"""
+    <div class="metric-card">
+        <h3>{title}</h3>
+        <p>{value}</p>
+    </div>
+    """
+
+def filter_data_for_section(section, df, user_selections):
+    filtered = df.copy()
+    
+    if 'countries' in user_selections and user_selections['countries']:
+        filtered = filtered[filtered['location'].isin(user_selections['countries'])]
+    
+    if 'measures' in user_selections and user_selections['measures']:
+        filtered = filtered[filtered['measure'].isin(user_selections['measures'])]
+    
+    if 'year' in user_selections and user_selections['year'] is not None:
+        filtered = filtered[filtered['year'] == user_selections['year']]
+    
+    if 'age' in user_selections and user_selections['age'] is not None:
+        filtered = filtered[filtered['age'] == user_selections['age']]
+    
+    if 'sex' in user_selections and user_selections['sex'] is not None and user_selections['sex'] != "All":
+        filtered = filtered[filtered['sex'] == user_selections['sex']]
+    
+    if 'rei' in user_selections and user_selections['rei']:
+        filtered = filtered[filtered['rei'].isin(user_selections['rei'])]
+    
+    # Check if the filtered dataset is empty
+    if filtered.empty:
+        st.warning("No data available for the selected filters. Please adjust your selection.")
+        st.write("Selected filters:", user_selections)
+        return None
+    
+    return filtered
+
+def filter_data(df, countries, year_range, measures, sex, age_groups, reis):
+    return df[
+        (df['location'].isin(countries)) &
+        (df['year'].between(year_range[0], year_range[1])) &
+        (df['measure'].isin(measures)) &
+        (df['sex'].isin(sex)) &
+        (df['age'].isin(age_groups)) &
+        (df['rei'].isin(reis))
+    ]
+
+# Function to perform the forecast using multiple fallback methods
+def forecast_data(data, periods, risk_factors, metric):
+    try:
+        # Prepare the data
+        target = data.groupby('year')[metric].mean()
+        
+        # Determine the number of seasonal periods based on the data's length
+        # Set a minimum of 2 for seasonal_periods
+        seasonal_periods = max(2, len(target) // 2)  # Adjust this logic based on your data
+        
+        if len(target) > seasonal_periods:
+            # Only apply seasonal modeling if the data length supports it
+            model = ExponentialSmoothing(target, trend='add', seasonal='add', seasonal_periods=seasonal_periods)
+        else:
+            # If insufficient data, fall back to a non-seasonal model
+            model = ExponentialSmoothing(target, trend='add', seasonal=None)
+        
+        fitted_model = model.fit()
+        forecast = fitted_model.forecast(periods)
+        
+        # If forecast is successful, return it
+        if not np.isnan(forecast).any():
+            return forecast
+        
+        # If Holt-Winters fails, try simple exponential smoothing
+        model = ExponentialSmoothing(target, trend=None, seasonal=None)
+        fitted_model = model.fit()
+        forecast = fitted_model.forecast(periods)
+        
+        # If simple exponential smoothing is successful, return it
+        if not np.isnan(forecast).any():
+            return forecast
+        
+        # If all else fails, use moving average
+        window = min(len(target), 3)  # Use up to 3 years for moving average
+        ma = target.rolling(window=window).mean()
+        last_ma = ma.iloc[-1]
+        last_year = pd.to_datetime(str(data['year'].max()), format='%Y')
+        forecast = pd.Series([last_ma] * periods, index=pd.date_range(start=last_year + pd.DateOffset(years=1), periods=periods, freq='Y'))
+        
+        return forecast
+    
+    except Exception as e:
+        st.error(f"Error in forecasting: {e}")
+        # If everything fails, return a flat line based on the last known value
+        last_value = data[metric].iloc[-1]
+        last_year = pd.to_datetime(str(data['year'].max()), format='%Y')
+        forecast = pd.Series([last_value] * periods, index=pd.date_range(start=last_year + pd.DateOffset(years=1), periods=periods, freq='Y'))
+        return forecast
+
+# Sidebar
+st.sidebar.title("Stroke Analysis Dashboard")
+
+# Sidebar navigation
+selected_section = st.sidebar.radio("Select Section", 
+    ["Introduction", "Geographical Analysis", "Temporal Trends", "Demographic Analysis", "Risk Factor Analysis", 
+     "Forecasting", "Statistical Tests"])
+
 # Main content
 if selected_section == "Introduction":
     st.title("Introduction to Stroke Analysis Dashboard")
@@ -234,7 +597,6 @@ if selected_section == "Introduction":
         data=csv_full,
         file_name="full_stroke_data.csv",
         mime="text/csv",
-        
     )
 
 elif selected_section == "Geographical Analysis":
@@ -246,7 +608,7 @@ elif selected_section == "Geographical Analysis":
     
     with col1:
         countries = df['location'].unique()
-        selected_countries = st.multiselect("Select Countries", countries, default=countries[:3], key="georgraphical_countries")
+        selected_countries = st.multiselect("Select Countries", countries, default=countries[:3], key="geographical_countries")
     
     with col2:
         years = df['year'].dropna().unique().astype(int)
@@ -301,7 +663,7 @@ elif selected_section == "Geographical Analysis":
     country_analysis = filtered_df.groupby('location').agg({
         'Rate': ['mean', lambda x: x.iloc[-1]],  # Average and most recent burden rate
         'rei': lambda x: x.value_counts().index[0],  # Most common risk factor
-        'year': 'max'  # Most recent year
+        ''year': 'max'  # Most recent year
     }).reset_index()
 
     country_analysis.columns = ['Country', 'Average Burden', 'Current Burden', 'Top Risk Factor', 'Latest Year']
@@ -356,18 +718,16 @@ elif selected_section == "Geographical Analysis":
     st.write(f"2. {lowest_burden['Country']} has the lowest average stroke burden rate of {lowest_burden['Average Burden']:.2f}, with a current burden rate of {lowest_burden['Current Burden']:.2f} as of {lowest_burden['Latest Year']:.0f}. The top risk factor is {lowest_burden['Top Risk Factor']}.")
     st.write(f"3. The average burden rate across all selected countries is {country_analysis['Average Burden'].mean():.2f}.")
 
-
     # Download button for filtered data
     csv = filtered_df.to_csv(index=False).encode('utf-8')
     st.download_button(
-    label="Download filtered data as CSV",
-    data=csv,
-    file_name="filtered_stroke_data.csv",
-    mime="text/csv",
-    key="geographical_download_button"  # Added unique key
-)
+        label="Download filtered data as CSV",
+        data=csv,
+        file_name="filtered_stroke_data.csv",
+        mime="text/csv",
+        key="geographical_download_button"
+    )
 
-    
 elif selected_section == "Temporal Trends":
     st.title("Temporal Trends in Stroke Burden")
     
@@ -735,6 +1095,7 @@ elif selected_section == "Demographic Analysis":
             mime="text/csv",
             key="demographic_analysis_download_button"
         )
+
 elif selected_section == "Risk Factor Analysis":
     st.title("Risk Factor Analysis for Stroke Burden")
     
@@ -751,53 +1112,250 @@ elif selected_section == "Risk Factor Analysis":
     # Filter data
     filtered_df = filter_data(df, selected_countries, year_range, [selected_measure], df['sex'].unique(), df['age'].unique(), df['rei'].unique())
     
-    # Ensure correct aggregation: Use the mean for Rate
-    risk_df = filtered_df.pivot_table(values='Rate', index='location', columns='rei', aggfunc='mean')
-    
-    # Visualize with a heatmap
-    fig = px.imshow(risk_df, 
-                    labels=dict(x="Risk Factor", y="Country", color="Burden Rate"),
-                    title=f'Heatmap of Risk Factors Impact on {selected_measure}',
-                    color_continuous_scale=px.colors.sequential.YlOrRd)
-    
-    fig.update_layout(height=600)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Radar chart for mean impact of risk factors
-    risk_mean = risk_df.mean().reset_index()
-    risk_mean.columns = ['Risk Factor', 'Mean Impact']
-    
-    fig = go.Figure(data=go.Scatterpolar(
-      r=risk_mean['Mean Impact'],
-      theta=risk_mean['Risk Factor'],
-      fill='toself',
-      line=dict(color='rgb(31, 119, 180)')
-    ))
+    if filtered_df.empty:
+        st.warning("No data available for the selected filters. Please adjust your selection.")
+    else:
+        risk_df = filtered_df.pivot_table(values='Rate', index='location', columns='rei', aggfunc='sum')
+        
+        fig = px.imshow(risk_df, 
+                        labels=dict(x="Risk Factor", y="Country", color="Burden Rate"),
+                        title=f'Heatmap of Risk Factors Impact on {selected_measure}',
+                        color_continuous_scale=px.colors.sequential.YlOrRd)
+        
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Radar chart
+        risk_mean = risk_df.mean().reset_index()
+        risk_mean.columns = ['Risk Factor', 'Mean Impact']
+        
+        fig = go.Figure(data=go.Scatterpolar(
+          r=risk_mean['Mean Impact'],
+          theta=risk_mean['Risk Factor'],
+          fill='toself',
+          line=dict(color='rgb(31, 119, 180)')
+        ))
 
-    fig.update_layout(
-      polar=dict(
-        radialaxis=dict(
-          visible=True,
-          range=[0, risk_mean['Mean Impact'].max()]
-        )),
-      showlegend=False,
-      title=f'Average Impact of Risk Factors on {selected_measure}'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Add insights
-    st.subheader("Key Insights")
-    top_risk_factor = risk_mean.loc[risk_mean['Mean Impact'].idxmax()]
-    st.write(f"1. The risk factor with the highest average impact on {selected_measure} is '{top_risk_factor['Risk Factor']}' with a mean impact of {top_risk_factor['Mean Impact']:.2f}.")
-    
-    country_top_risks = risk_df.idxmax(axis=1)
-    most_common_risk = country_top_risks.value_counts().index[0]
-    st.write(f"2. The most common top risk factor across countries for {selected_measure} is '{most_common_risk}'.")
-    
-    risk_variability = risk_df.std() / risk_df.mean()
-    most_variable_risk = risk_variability.idxmax()
-    st.write(f"3. The risk factor with the most variability across countries for {selected_measure} is '{most_variable_risk}'.")
+        fig.update_layout(
+          polar=dict(
+            radialaxis=dict(
+              visible=True,
+              range=[0, risk_mean['Mean Impact'].max()]
+            )),
+          showlegend=False,
+          title=f'Average Impact of Risk Factors on {selected_measure}'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Add insights
+        st.subheader("Key Insights")
+        top_risk_factor = risk_mean.loc[risk_mean['Mean Impact'].idxmax()]
+        st.write(f"1. The risk factor with the highest average impact on {selected_measure} is '{top_risk_factor['Risk Factor']}' with a mean impact of {top_risk_factor['Mean Impact']:.2f}.")
+        
+        country_top_risks = risk_df.idxmax(axis=1)
+        most_common_risk = country_top_risks.value_counts().index[0]
+        st.write(f"2. The most common top risk factor across countries for {selected_measure} is '{most_common_risk}'.")
+        
+        risk_variability = risk_df.std() / risk_df.mean()
+        most_variable_risk = risk_variability.idxmax()
+        st.write(f"3. The risk factor with the most variability across countries for {selected_measure} is '{most_variable_risk}'.")
+
+        # Download button for filtered data
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Risk Factor Analysis Data",
+            data=csv,
+            file_name="risk_factor_analysis.csv",
+            mime="text/csv",
+            key="risk_factor_analysis_download_button"
+        )
+
+elif selected_section == "Forecasting":
+    st.markdown("<div class='section-header'><h1>Stroke Burden Forecasting</h1></div>", unsafe_allow_html=True)
+
+    # Create columns for better filter layout
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_countries = st.multiselect("Select Countries for Forecasting", df['location'].unique(), default=['Algeria'])
+        selected_measures = st.multiselect("Select Measures", df['measure'].unique(), default=df['measure'].unique()[:1])
+
+    with col2:
+        metric = st.selectbox("Select Metric for Forecasting", ["Rate", "Percent"])
+        
+        # Add "All Ages" option to age group selection
+        age_options = ["All Ages"] + list(df['age'].unique())
+        selected_age_group = st.selectbox("Select Age Group", age_options)
+
+    with col3:
+        gender = st.selectbox("Select Gender", ["All", "Male", "Female"])
+        selected_risk_factors = st.multiselect("Select Risk Factors", df['rei'].unique(), default=df['rei'].unique()[:3])
+
+    forecast_years = st.slider("Select number of years to forecast", 1, 10, 5)
+
+    if st.button("Generate Forecast", key="forecast_filter", help="Click to generate the forecast based on selected filters"):
+        user_selections = {
+            'countries': selected_countries,
+            'measures': selected_measures,
+            'age': None if selected_age_group == "All Ages" else selected_age_group,
+            'sex': gender,
+            'rei': selected_risk_factors
+        }
+
+        filtered_df = filter_data_for_section(selected_section, df, user_selections)
+
+        if filtered_df is not None and not filtered_df.empty:
+            # Prepare data for forecasting
+            forecast_df = filtered_df.groupby(['year', 'location', 'measure', 'rei'])[metric].mean().reset_index()
+
+            # Perform forecasting for each country and measure
+            for country in selected_countries:
+                for measure in selected_measures:
+                    country_measure_data = forecast_df[
+                        (forecast_df['location'] == country) & 
+                        (forecast_df['measure'] == measure)
+                    ]
+
+                    if not country_measure_data.empty:
+                        forecast = forecast_data(country_measure_data, forecast_years, selected_risk_factors, metric)
+
+                        if forecast is not None and len(forecast) > 0:
+                            # Create forecast DataFrame
+                            last_year = country_measure_data['year'].max()
+                            forecast_index = pd.date_range(start=str(last_year + 1), periods=forecast_years, freq='Y')
+                            forecast_df_future = pd.DataFrame({
+                                'Year': forecast_index.year,
+                                f'Forecasted {metric}': forecast
+                            })
+
+                            # Plot results with enhanced design
+                            st.markdown(f"<h2 class='section-header'>{measure} Forecast for {country}</h2>", unsafe_allow_html=True)
+                            fig = go.Figure()
+
+                            fig.add_trace(go.Scatter(
+                                x=country_measure_data['year'].unique(), 
+                                y=country_measure_data.groupby('year')[metric].mean(),
+                                mode='lines+markers', 
+                                name='Historical', 
+                                line=dict(color='blue', width=2),
+                                marker=dict(size=8)
+                            ))
+
+                            fig.add_trace(go.Scatter(
+                                x=forecast_df_future['Year'], 
+                                y=forecast_df_future[f'Forecasted {metric}'],
+                                mode='lines+markers', 
+                                name='Forecast', 
+                                line=dict(color='red', width=2, dash='dash'),
+                                marker=dict(size=8, symbol='diamond')
+                            ))
+
+                            fig.update_layout(
+                                xaxis_title='Year', 
+                                yaxis_title=f'{measure} {metric}',
+                                legend_title='Legend', 
+                                height=600,
+                                template='plotly_white'
+                            )
+
+                            st.plotly_chart(fig, use_container_width=True)
+
+                            # Display forecast table with improved design
+                            st.markdown(f"<h3 class='section-header'>Forecast Table for {country} - {measure}</h3>", unsafe_allow_html=True)
+                            st.markdown("""
+                            <div class="explanation-box">
+                                <p><strong>Forecast Table Explanation:</strong> This table shows the projected values for future years based on historical trends and selected risk factors. The 'Year' column represents future years, and the 'Forecasted {metric}' column shows the predicted {metric} for each year.</p>
+                            </div>
+                            """.format(metric=metric), unsafe_allow_html=True)
+                            
+                            # Improved table design
+                            st.markdown('<div class="forecast-table">', unsafe_allow_html=True)
+                            styled_forecast = forecast_df_future.style.background_gradient(cmap='Blues', subset=[f'Forecasted {metric}']).format({f'Forecasted {metric}': '{:.2f}'})
+                            st.table(styled_forecast)
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                            # Calculate meaningful insights
+                            historical_mean = country_measure_data.groupby('year')[metric].mean().mean()
+                            forecast_mean = forecast.mean()
+                            percent_change = ((forecast_mean - historical_mean) / historical_mean) * 100
+                            
+                            last_historical = country_measure_data.groupby('year')[metric].mean().iloc[-1]
+                            first_forecast = forecast.iloc[0]
+                            last_forecast = forecast.iloc[-1]
+                            
+                            short_term_trend = ((first_forecast - last_historical) / last_historical) * 100
+                            long_term_trend = ((last_forecast - first_forecast) / first_forecast) * 100
+
+                            # Display insights with improved design
+                            st.markdown("<h3 class='section-header'>Forecast Insights</h3>", unsafe_allow_html=True)
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown(f"""
+                                <div class="insight-card">
+                                    <h4>Overall Trend</h4>
+                                    <p>The average {metric} is projected to <span style="color: {'red' if percent_change > 0 else 'green'}; font-weight: bold;">{'increase' if percent_change > 0 else 'decrease'} by {abs(percent_change):.2f}%</span> over the forecast period.</p>
+                                    <p>This suggests a <span style="font-weight: bold;">{'worsening' if percent_change > 0 else 'improving'}</span> trend in stroke burden for {country}.</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with col2:
+                                st.markdown(f"""
+                                <div class="insight-card">
+                                    <h4>Short-term vs Long-term Trends</h4>
+                                    <p>Short-term change (first year): <span style="color: {'red' if short_term_trend > 0 else 'green'}; font-weight: bold;">{'increase' if short_term_trend > 0 else 'decrease'} of {abs(short_term_trend):.2f}%</span></p>
+                                    <p>Long-term change (entire forecast): <span style="color: {'red' if long_term_trend > 0 else 'green'}; font-weight: bold;">{'increase' if long_term_trend > 0 else 'decrease'} of {abs(long_term_trend):.2f}%</span></p>
+                                    <p>This indicates <span style="font-weight: bold;">{'acceleration' if abs(long_term_trend) > abs(short_term_trend) else 'deceleration'}</span> in the trend over time.</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            st.markdown(f"""
+                            <div class="insight-card">
+                                <h4>Key Takeaways</h4>
+                                <ol>
+                                    <li>The forecast suggests a <span style="font-weight: bold;">{'rising' if percent_change > 0 else 'falling'}</span> trend in stroke burden for {country}, considering the selected risk factors.</li>
+                                    <li>Policy makers should <span style="font-weight: bold;">{'prepare for increased healthcare demands' if percent_change > 0 else 'capitalize on the improving situation'}</span>, with a focus on managing the selected risk factors.</li>
+                                    <li>{'<span style="color: red; font-weight: bold;">Immediate action may be needed</span> to address the rapidly increasing burden.' if short_term_trend > 5 else 'The change appears to be gradual, allowing time for measured policy responses.'}</li>
+                                    <li>{'The situation is projected to worsen over time, requiring <span style="font-weight: bold;">long-term planning and interventions</span>.' if long_term_trend > short_term_trend else 'The rate of change is expected to slow down over time, but continued monitoring is advised.'}</li>
+                                    <li>Regular reassessment of these projections is recommended as new data becomes available, especially regarding the impact of the selected risk factors.</li>
+                                </ol>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # Explanation of metrics and risk factor integration
+                            st.markdown("""
+                            <div class="explanation-box">
+                                <h4>Explanation of Metrics and Risk Factor Integration</h4>
+                                <p><strong>Percent Change:</strong> Calculated as the percentage difference between the average forecasted value and the average historical value. It indicates the overall expected change in stroke burden, considering the selected risk factors.</p>
+                                <p><strong>Short-term Trend:</strong> Calculated as the percentage change between the last historical data point and the first forecasted point. It shows the immediate expected change, influenced by recent risk factor trends.</p>
+                                <p><strong>Long-term Trend:</strong> Calculated as the percentage change between the first and last forecasted points. It indicates the expected change over the entire forecast period, accounting for projected changes in risk factors.</p>
+                                <p><strong>Risk Factor Integration:</strong> The forecast model incorporates the selected risk factors as exogenous variables, allowing their historical trends to influence future projections. This approach provides a more nuanced forecast that considers the complex interplay of various risk factors on stroke burden.</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        else:
+                            st.info(f"Unable to generate a reliable forecast for {country} - {measure} due to limited data. Consider adjusting your selection or gathering more historical data.")
+                    else:
+                        st.info(f"No data available for {country} - {measure}. Please adjust your selection.")
+
+            # Export functionality
+            if st.button("Export Forecast Results"):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    for country in selected_countries:
+                        for measure in selected_measures:
+                            country_measure_data = forecast_df[(forecast_df['location'] == country) & (forecast_df['measure'] == measure)]
+                            if len(country_measure_data) > 0:
+                                country_measure_data.to_excel(writer, sheet_name=f'{country}_{measure}', index=False)
+                    writer.save()
+                output.seek(0)
+                b64 = base64.b64encode(output.read()).decode()
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="forecast_results.xlsx" class="apply-filter-btn">Download Excel File</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        else:
+            st.info("No data available for the selected filters. Please adjust your selection and try again.")
 
 elif selected_section == "Statistical Tests":
     st.title("Statistical Tests and Advanced Analysis")
